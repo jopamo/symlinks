@@ -19,7 +19,6 @@
 #define S_ISLNK(mode) (((mode) & S_IFMT) == S_IFLNK)
 #endif
 
-/* Fallback if PATH_MAX not defined. */
 #ifndef PATH_MAX
 #define PATH_MAX 1024
 #endif
@@ -27,20 +26,22 @@
 #define PROGRAM_VERSION "1.4.3"
 
 /* Global flags set by command-line options */
-static int g_verbose = 0;   /* -v */
-static int g_fix_links = 0; /* -c */
-static int g_recurse = 0;   /* -r */
-static int g_delete = 0;    /* -d */
-static int g_shorten = 0;   /* -s */
-static int g_testing = 0;   /* -t */
-static int g_single_fs = 1; /* -o (off by default => single-fs=1) */
+static int g_verbose   = 0;  /* -v */
+static int g_fix_links = 0;  /* -c */
+static int g_recurse   = 0;  /* -r */
+static int g_delete    = 0;  /* -d */
+static int g_shorten   = 0;  /* -s */
+static int g_testing   = 0;  /* -t */
+static int g_single_fs = 1;  /* -o (off by default => single-fs=1) */
+static int g_debug     = 0;  /* -x (new debug switch) */
 
 /*
  * replace_substring:
  *   Replace occurrences of 'old_sub' in 's' with 'new_sub' in-place, up to bufsize.
  *   Returns the number of replacements performed, or -1 if there is not enough space.
  */
-static int replace_substring(char* s, size_t bufsize, const char* old_sub, const char* new_sub) {
+static int replace_substring(char* s, size_t bufsize, const char* old_sub, const char* new_sub)
+{
     if (!s || !old_sub || !*old_sub) {
         return 0;
     }
@@ -54,7 +55,6 @@ static int replace_substring(char* s, size_t bufsize, const char* old_sub, const
 
     int total_replacements = 0;
 
-    /* Repeatedly search for 'old_sub' and replace. */
     while (1) {
         char* match_pos = strstr(s, old_sub);
         if (!match_pos) {
@@ -101,7 +101,8 @@ static int replace_substring(char* s, size_t bufsize, const char* old_sub, const
  *   Removes redundant slashes, "./" references, and collapses "/../" if possible.
  *   Modifies path in-place. Returns non-zero if modifications were made.
  */
-static int tidy_path(char* path) {
+static int tidy_path(char* path)
+{
     if (!path || !*path) {
         return 0;
     }
@@ -114,16 +115,16 @@ static int tidy_path(char* path) {
     size_t len = strlen(path);
     if (len + 2 < sizeof(working) && path[len - 1] != '/') {
         snprintf(working, sizeof(working), "%s/", path);
-    }
-    else {
+    } else {
         strncpy(working, path, sizeof(working) - 1);
     }
 
-    /* Repeatedly remove "/./" and "//" */
     int r;
+    /* Remove "/./" occurrences */
     while ((r = replace_substring(working, sizeof(working), "/./", "/")) > 0) {
         changed = 1;
     }
+    /* Remove consecutive slashes "//" */
     while ((r = replace_substring(working, sizeof(working), "//", "/")) > 0) {
         changed = 1;
     }
@@ -138,7 +139,7 @@ static int tidy_path(char* path) {
             break;
         }
         if (p == working) {
-            /* "/../" at the very start => just remove it */
+            /* "/../" at the start => remove it */
             replace_substring(working, sizeof(working), "/../", "/");
             changed = 1;
             continue;
@@ -149,11 +150,10 @@ static int tidy_path(char* path) {
             slash--;
         }
         if (slash == working && *slash == '/') {
-            /* At root => cannot remove previous component, so just remove the "/.." part */
+            /* At root => remove the "/.." part */
             replace_substring(working, sizeof(working), "/../", "/");
             changed = 1;
-        }
-        else {
+        } else {
             memmove(slash, p + 3, strlen(p + 3) + 1);
             changed = 1;
         }
@@ -180,37 +180,32 @@ static int tidy_path(char* path) {
 
 /*
  * shorten_path:
- *   Attempts to remove unnecessary "../dir" segments. This version is
- *   still somewhat naive, but tries to remove consecutive "../some_dir"
- *   if it can confirm partial overlap with the base path.
- *
+ *   Attempts to remove unnecessary "../dir" segments (a naive approach).
  *   Returns non-zero if changes were made.
  */
-static int shorten_path(char* link_path, const char* base_path) {
+static int shorten_path(char* link_path, const char* base_path)
+{
     if (!link_path || !*link_path || !base_path || !*base_path) {
         return 0;
     }
 
     int shortened = 0;
 
-    /* Naive repeated search for "../". */
     for (;;) {
         char* p = strstr(link_path, "../");
         if (!p) {
             break;
         }
-        /* If base_path is "/", can't go higher. Stop. */
+        /* If base_path is "/", can't go higher. */
         if (!strcmp(base_path, "/")) {
             break;
         }
 
-        /* Find slash after the "../" to remove one "dir" if present. */
         char* slash_after_dir = strchr(p + 3, '/');
         if (!slash_after_dir) {
-            /* e.g. "foo/.." with no trailing slash => not removing. */
             break;
         }
-        /* Remove the entire "../xxx/" portion from link_path. */
+        /* Remove the entire "../xxx/" portion from link_path */
         memmove(p, slash_after_dir + 1, strlen(slash_after_dir + 1) + 1);
         shortened = 1;
     }
@@ -220,12 +215,10 @@ static int shorten_path(char* link_path, const char* base_path) {
 
 /*
  * build_relative_path:
- *   Safely build a relative path from 'from_dir' to 'to_path' using realpath.
- *   - 'from_dir' and 'to_path' must both exist, so that realpath() works.
- *   - On success, the resulting relative path is placed into 'out', up to out_size.
- *   - Returns 0 on success, -1 on error.
+ *   Builds a relative path from 'from_dir' to 'to_path' using realpath().
  */
-static int build_relative_path(const char* from_dir, const char* to_path, char* out, size_t out_size) {
+static int build_relative_path(const char* from_dir, const char* to_path, char* out, size_t out_size)
+{
     if (!from_dir || !to_path || !out) {
         return -1;
     }
@@ -233,17 +226,14 @@ static int build_relative_path(const char* from_dir, const char* to_path, char* 
     char resolved_from[PATH_MAX];
     char resolved_to[PATH_MAX];
 
-    /* Resolve the 'from_dir' (directory containing the symlink). */
     if (!realpath(from_dir, resolved_from)) {
-        /* If realpath fails, we cannot do safe relative path. */
         return -1;
     }
-    /* Resolve the final target path. */
     if (!realpath(to_path, resolved_to)) {
         return -1;
     }
 
-    /* Split both into tokens by '/' and find common prefix. */
+    /* Tokenize each resolved path */
     char from_copy[PATH_MAX], to_copy[PATH_MAX];
     strncpy(from_copy, resolved_from, sizeof(from_copy) - 1);
     from_copy[sizeof(from_copy) - 1] = '\0';
@@ -253,24 +243,22 @@ static int build_relative_path(const char* from_dir, const char* to_path, char* 
     char *from_tokens[PATH_MAX], *to_tokens[PATH_MAX];
     int from_count = 0, to_count = 0;
 
-    /* Tokenize from_copy */
     {
         char* p = strtok(from_copy, "/");
-        while (p && from_count < (int)(sizeof(from_tokens) / sizeof(from_tokens[0]))) {
+        while (p && from_count < (int)(sizeof(from_tokens)/sizeof(from_tokens[0]))) {
             from_tokens[from_count++] = p;
             p = strtok(NULL, "/");
         }
     }
-    /* Tokenize to_copy */
     {
         char* q = strtok(to_copy, "/");
-        while (q && to_count < (int)(sizeof(to_tokens) / sizeof(to_tokens[0]))) {
+        while (q && to_count < (int)(sizeof(to_tokens)/sizeof(to_tokens[0]))) {
             to_tokens[to_count++] = q;
             q = strtok(NULL, "/");
         }
     }
 
-    /* Find common prefix length */
+    /* Find common prefix */
     int i = 0;
     while (i < from_count && i < to_count) {
         if (strcmp(from_tokens[i], to_tokens[i]) != 0) {
@@ -279,41 +267,39 @@ static int build_relative_path(const char* from_dir, const char* to_path, char* 
         i++;
     }
 
-    /* Build a relative path: For each remaining token in 'from', we emit "../". */
-    /* Then append the remainder of 'to'. */
+    /* Build a relative path */
     out[0] = '\0';
     int needed_len = 0;
 
-    /* Step up for the remainder of 'from' after the common prefix. */
+    /* Add ../ for each remaining component in 'from' */
     for (int j = i; j < from_count; j++) {
-        if ((needed_len + 4) >= (int)out_size) {
-            return -1; /* too long */
+        if (needed_len + 4 >= (int)out_size) {
+            return -1;
         }
         strcat(out, "../");
         needed_len += 3;
     }
 
-    /* Then descend into the remainder of 'to'. */
+    /* Add forward path for remainder of 'to' */
     for (int j = i; j < to_count; j++) {
-        size_t segment_len = strlen(to_tokens[j]);
+        size_t seg_len = strlen(to_tokens[j]);
         /* +1 for '/', +1 for final '\0' */
-        if (needed_len + segment_len + 2 >= out_size) {
+        if (needed_len + seg_len + 2 >= out_size) {
             return -1;
         }
         strcat(out, to_tokens[j]);
-        needed_len += segment_len;
+        needed_len += seg_len;
         if (j < to_count - 1) {
             strcat(out, "/");
             needed_len += 1;
         }
     }
 
-    /* If nothing was added, it means we are in the same directory => "." */
+    /* If nothing was added => same directory */
     if (out[0] == '\0') {
         if (out_size > 1) {
             strcpy(out, ".");
-        }
-        else {
+        } else {
             return -1;
         }
     }
@@ -324,12 +310,9 @@ static int build_relative_path(const char* from_dir, const char* to_path, char* 
 /*
  * fix_symlink:
  *   Processes a symlink at 'symlink_path'.
- *   - If the link is dangling and -d is set, remove it.
- *   - If the link crosses to another filesystem (and -o not set), skip or warn.
- *   - If -c is set, convert absolute links to relative.
- *   - If -s is set, attempt to shorten the link path.
  */
-static void fix_symlink(const char* symlink_path, dev_t base_dev) {
+static void fix_symlink(const char* symlink_path, dev_t base_dev)
+{
     char link_value[PATH_MAX + 1];
     memset(link_value, 0, sizeof(link_value));
 
@@ -340,23 +323,22 @@ static void fix_symlink(const char* symlink_path, dev_t base_dev) {
     }
     link_value[n] = '\0';
 
+    if (g_debug) {
+        fprintf(stderr, "[DEBUG] Symlink: %s -> %s\n", symlink_path, link_value);
+    }
+
     /* Build absolute version to check if it's dangling or cross-FS. */
     char abs_resolved[PATH_MAX * 2];
     memset(abs_resolved, 0, sizeof(abs_resolved));
 
     if (link_value[0] == '/') {
-        /* Already absolute. */
         strncpy(abs_resolved, link_value, sizeof(abs_resolved) - 1);
-    }
-    else {
-        /* Use symlink's directory + link_value. */
+    } else {
         strncpy(abs_resolved, symlink_path, sizeof(abs_resolved) - 1);
         char* last_slash = strrchr(abs_resolved, '/');
         if (last_slash) {
             *(last_slash + 1) = '\0';
-        }
-        else {
-            /* No slash => treat current dir as '.' */
+        } else {
             strcpy(abs_resolved, "./");
         }
         strncat(abs_resolved, link_value, sizeof(abs_resolved) - strlen(abs_resolved) - 1);
@@ -364,17 +346,23 @@ static void fix_symlink(const char* symlink_path, dev_t base_dev) {
 
     tidy_path(abs_resolved);
 
+    if (g_debug) {
+        fprintf(stderr, "[DEBUG] Resolved path for stat(): %s\n", abs_resolved);
+    }
+
     struct stat stbuf;
     if (stat(abs_resolved, &stbuf) == -1) {
         /* Dangling link. */
         if (g_verbose) {
             printf("dangling: %s -> %s\n", symlink_path, link_value);
         }
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] stat failed; link is dangling.\n");
+        }
         if (g_delete) {
             if (unlink(symlink_path) == 0) {
                 printf("deleted:  %s -> %s\n", symlink_path, link_value);
-            }
-            else {
+            } else {
                 perror("unlink");
             }
         }
@@ -386,37 +374,44 @@ static void fix_symlink(const char* symlink_path, dev_t base_dev) {
         if (g_verbose) {
             printf("other_fs: %s -> %s\n", symlink_path, link_value);
         }
-        /* Do nothing with cross-FS links, per original code. */
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] Different filesystem, skipping unless -o used.\n");
+        }
         return;
     }
 
-    /* Possibly tidy or shorten a local copy of link_value. */
     char new_link[PATH_MAX + 1];
     snprintf(new_link, sizeof(new_link), "%s", link_value);
 
     int is_abs = (link_value[0] == '/');
-    int changed_messy = tidy_path(new_link);
-    int changed_short = 0;
+    int changed_messy  = tidy_path(new_link);
+    int changed_short  = 0;
     if (g_shorten) {
         changed_short = shorten_path(new_link, symlink_path);
+    }
+
+    if (g_debug) {
+        fprintf(stderr, "[DEBUG] new_link after tidy/shorten: %s\n", new_link);
     }
 
     if (g_verbose) {
         if (is_abs && !g_fix_links) {
             printf("absolute: %s -> %s\n", symlink_path, link_value);
-        }
-        else if (!is_abs) {
+        } else if (!is_abs) {
             if (changed_messy || changed_short) {
-                printf("relative (messy/shortened): %s -> %s\n", symlink_path, link_value);
-            }
-            else {
+                printf("relative (messy/shortened): %s -> %s\n",
+                       symlink_path, link_value);
+            } else {
                 printf("relative: %s -> %s\n", symlink_path, link_value);
             }
         }
     }
 
-    /* If not converting links and not in test mode, do nothing. */
+    /* If not converting links and not in test mode, do nothing unless they changed. */
     if ((!g_fix_links && !g_testing) && !(changed_messy || changed_short)) {
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] No conversion needed, returning.\n");
+        }
         return;
     }
 
@@ -428,32 +423,44 @@ static void fix_symlink(const char* symlink_path, dev_t base_dev) {
 
         char* slash = strrchr(symlink_dir, '/');
         if (slash) {
-            *(slash + 1) = '\0'; /* keep trailing slash to represent directory */
-        }
-        else {
+            *(slash + 1) = '\0';
+        } else {
             strcpy(symlink_dir, "./");
         }
 
-        /* Attempt to build a robust relative path. */
-        if (build_relative_path(symlink_dir, abs_resolved, new_link, sizeof(new_link)) < 0) {
-            /* Fallback: if we fail, just leave it as-is or do naive approach. */
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] symlink_dir = %s\n", symlink_dir);
+            fprintf(stderr, "[DEBUG] abs_resolved = %s\n", abs_resolved);
+        }
+
+        if (build_relative_path(symlink_dir, abs_resolved,
+                                new_link, sizeof(new_link)) < 0)
+        {
+            /* Fallback */
             strncpy(new_link, link_value, sizeof(new_link) - 1);
             new_link[sizeof(new_link) - 1] = '\0';
-        }
-        else {
+            if (g_debug) {
+                fprintf(stderr, "[DEBUG] build_relative_path failed; fallback to link_value\n");
+            }
+        } else {
             if (g_shorten) {
                 shorten_path(new_link, symlink_path);
+            }
+            if (g_debug) {
+                fprintf(stderr, "[DEBUG] new_link after build_relative_path: %s\n", new_link);
             }
         }
     }
 
-    /* If only testing, do not modify the filesystem. */
     if (g_testing) {
         printf("(test) would change: %s -> %s\n", symlink_path, new_link);
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] In test mode; not changing filesystem.\n");
+        }
         return;
     }
 
-    /* Actually unlink and recreate the symlink with new_link. */
+    /* Perform the actual change */
     if (unlink(symlink_path) != 0) {
         fprintf(stderr, "Cannot unlink %s: %s\n", symlink_path, strerror(errno));
         return;
@@ -469,16 +476,19 @@ static void fix_symlink(const char* symlink_path, dev_t base_dev) {
 /*
  * scan_directory:
  *   Recursively scans directory at 'path'.
- *   - Processes symlinks via fix_symlink().
- *   - If -r is set, recurse into subdirectories (respecting single-fs if set).
  */
-static void scan_directory(char* path, dev_t base_dev, int depth) {
+static void scan_directory(char* path, dev_t base_dev, int depth)
+{
     if (!path) {
         return;
     }
     if (depth > 128) {
         fprintf(stderr, "Recursion limit reached at %s; skipping.\n", path);
         return;
+    }
+
+    if (g_debug) {
+        fprintf(stderr, "[DEBUG] scan_directory: %s (depth=%d)\n", path, depth);
     }
 
     DIR* dfd = opendir(path);
@@ -495,7 +505,7 @@ static void scan_directory(char* path, dev_t base_dev, int depth) {
     size_t path_len = strlen(path);
     if (path_len + 2 < PATH_MAX && path[path_len - 1] != '/') {
         path[path_len++] = '/';
-        path[path_len] = '\0';
+        path[path_len]   = '\0';
     }
 
     struct dirent* dp;
@@ -505,9 +515,12 @@ static void scan_directory(char* path, dev_t base_dev, int depth) {
             continue;
         }
 
-        /* Append entry name to path */
         strncpy(path + path_len, name, PATH_MAX - path_len);
         path[path_len + PATH_MAX - path_len - 1] = '\0'; /* ensure termination */
+
+        if (g_debug) {
+            fprintf(stderr, "[DEBUG] Checking entry: %s\n", path);
+        }
 
         struct stat st;
         if (lstat(path, &st) == -1) {
@@ -518,9 +531,7 @@ static void scan_directory(char* path, dev_t base_dev, int depth) {
 
         if (S_ISLNK(st.st_mode)) {
             fix_symlink(path, base_dev);
-        }
-        else if (S_ISDIR(st.st_mode) && g_recurse) {
-            /* Recurse if same device or ignoring device boundaries. */
+        } else if (S_ISDIR(st.st_mode) && g_recurse) {
             if (!g_single_fs || (st.st_dev == base_dev)) {
                 scan_directory(path, base_dev, depth + 1);
             }
@@ -531,7 +542,6 @@ static void scan_directory(char* path, dev_t base_dev, int depth) {
     }
 
     closedir(dfd);
-    /* Restore path fully. */
     strncpy(path, original_path, PATH_MAX);
     path[PATH_MAX - 1] = '\0';
 }
@@ -540,35 +550,39 @@ static void scan_directory(char* path, dev_t base_dev, int depth) {
  * print_usage:
  *   Print usage help to stderr.
  */
-static void print_usage(const char* progname) {
+static void print_usage(const char* progname)
+{
     fprintf(stderr,
-            "\n"
-            "Usage: %s [OPTIONS] DIR...\n"
-            "Scan and fix symbolic links in the specified directories.\n\n"
-            "Version: %s\n"
-            "\n"
-            "Options:\n"
-            "  -c  Convert absolute or messy links to relative.\n"
-            "  -d  Delete dangling links (those pointing to nonexistent targets).\n"
-            "  -o  Allow links across filesystems (otherwise just note 'other_fs').\n"
-            "  -r  Recurse into subdirectories.\n"
-            "  -s  Shorten links by removing unnecessary '../dir' sequences.\n"
-            "  -t  Test mode: show what would be done with -c, but do not modify.\n"
-            "  -v  Verbose: show all symlinks, including relative.\n"
-            "\n"
-            "Examples:\n"
-            "  %s -r /path/to/dir       Recursively scan directories for symlinks\n"
-            "  %s -rc /path/to/dir      Convert absolute to relative while scanning\n"
-            "  %s -rd /path/to/dir      Remove dangling links during a recursive scan\n"
-            "\n",
-            progname, PROGRAM_VERSION, progname, progname, progname);
+        "\n"
+        "Usage: %s [OPTIONS] DIR...\n"
+        "Scan and fix symbolic links in the specified directories.\n\n"
+        "Version: %s\n"
+        "\n"
+        "Options:\n"
+        "  -c  Convert absolute or messy links to relative.\n"
+        "  -d  Delete dangling links (those pointing to nonexistent targets).\n"
+        "  -o  Allow links across filesystems (otherwise just note 'other_fs').\n"
+        "  -r  Recurse into subdirectories.\n"
+        "  -s  Shorten links by removing unnecessary '../dir' sequences.\n"
+        "  -t  Test mode: show what would be done with -c, but do not modify.\n"
+        "  -v  Verbose: show all symlinks, including relative.\n"
+        "  -x  Debug: display internal processing details.\n"
+        "\n"
+        "Examples:\n"
+        "  %s -r /path/to/dir       Recursively scan directories for symlinks\n"
+        "  %s -rc /path/to/dir      Convert absolute to relative while scanning\n"
+        "  %s -rd /path/to/dir      Remove dangling links during a recursive scan\n"
+        "\n",
+        progname, PROGRAM_VERSION, progname, progname, progname
+    );
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
     const char* progname = argv[0];
     int opt;
 
-    while ((opt = getopt(argc, argv, "cdorstv")) != -1) {
+    while ((opt = getopt(argc, argv, "cdorstvx")) != -1) {
         switch (opt) {
             case 'c':
                 g_fix_links = 1;
@@ -591,6 +605,9 @@ int main(int argc, char** argv) {
             case 'v':
                 g_verbose = 1;
                 break;
+            case 'x':
+                g_debug = 1;
+                break;
             default:
                 print_usage(progname);
                 exit(EXIT_FAILURE);
@@ -598,12 +615,10 @@ int main(int argc, char** argv) {
     }
 
     if (optind >= argc) {
-        /* No directories provided */
         print_usage(progname);
         exit(EXIT_FAILURE);
     }
 
-    /* Process each path in turn */
     int dircount = 0;
     while (optind < argc) {
         char path[PATH_MAX + 1];
@@ -611,11 +626,8 @@ int main(int argc, char** argv) {
 
         const char* input = argv[optind++];
         if (input[0] == '/') {
-            /* Absolute path */
             strncpy(path, input, sizeof(path) - 1);
-        }
-        else {
-            /* Prepend current working directory */
+        } else {
             char cwd[PATH_MAX];
             if (!getcwd(cwd, sizeof(cwd))) {
                 fprintf(stderr, "getcwd() failed: %s\n", strerror(errno));
@@ -628,7 +640,6 @@ int main(int argc, char** argv) {
 
         tidy_path(path);
 
-        /* Stat to check if path exists / is accessible. */
         struct stat st;
         if (lstat(path, &st) == -1) {
             fprintf(stderr, "Cannot lstat %s: %s\n", path, strerror(errno));
@@ -636,14 +647,10 @@ int main(int argc, char** argv) {
         }
 
         if (S_ISDIR(st.st_mode)) {
-            /* It's a directory => traverse. */
             scan_directory(path, st.st_dev, 0);
-        }
-        else if (S_ISLNK(st.st_mode)) {
-            /* Single symlink => fix it */
+        } else if (S_ISLNK(st.st_mode)) {
             fix_symlink(path, st.st_dev);
-        }
-        else {
+        } else {
             fprintf(stderr, "%s is not a directory or symlink; skipping.\n", path);
         }
         dircount++;
