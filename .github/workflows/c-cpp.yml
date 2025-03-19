@@ -87,7 +87,7 @@ jobs:
           # Suppose you have a harness `fuzz_symlinks_full.c` and your main sources.
           clang $CFLAGS $LDFLAGS -fsanitize=fuzzer \
             -I. \
-            fuzz_symlinks_full.cpp \
+            fuzz_symlinks.cpp \
             symlinks.c \
             -o fuzz_symlinks_full
 
