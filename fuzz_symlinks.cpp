@@ -23,8 +23,7 @@
 int main(int argc, char** argv);
 
 // A helper to create a random file or symlink inside the temp dir.
-static void create_random_entry(const uint8_t* data, size_t size,
-                                const char* dirpath, int index) {
+static void create_random_entry(const uint8_t* data, size_t size, const char* dirpath, int index) {
     // We'll interpret data in some minimal way:
     //  first byte decides "file" vs "symlink".
     //  subsequent bytes for the symlink target or filename contents.
@@ -34,7 +33,7 @@ static void create_random_entry(const uint8_t* data, size_t size,
         return;
     }
 
-    int is_symlink = (data[0] & 1); // 0 => file, 1 => symlink
+    int is_symlink = (data[0] & 1);  // 0 => file, 1 => symlink
 
     // We'll generate a name like "entry_<index>" in 'dirpath'
     char pathbuf[1024];
@@ -48,7 +47,8 @@ static void create_random_entry(const uint8_t* data, size_t size,
             write(fd, data + 1, size - 1);
             close(fd);
         }
-    } else {
+    }
+    else {
         // Create a symlink
         // We'll treat data+1 as a "target string" (ensure it's null-terminated).
         char target[256];
@@ -62,14 +62,13 @@ static void create_random_entry(const uint8_t* data, size_t size,
 }
 
 // A helper to parse random bytes into symlinks command-line flags.
-static void parse_flags_from_data(const uint8_t** pData, size_t* pSize,
-                                  int* out_argc, char** out_argv) {
+static void parse_flags_from_data(const uint8_t** pData, size_t* pSize, int* out_argc, char** out_argv) {
     // We'll interpret up to the first byte as flags to set.
     // e.g. bits: 1 => -c, 2 => -d, 4 => -r, 8 => -s, 16 => -t, 32 => -v, 64 => -x, ...
     // This is purely an example. Feel free to expand to all possible bits.
 
     if (*pSize < 1) {
-        return; // no flags
+        return;  // no flags
     }
 
     uint8_t flags = **pData;
@@ -79,13 +78,27 @@ static void parse_flags_from_data(const uint8_t** pData, size_t* pSize,
     // Now, for each bit, if set, we push an arg like "-c", "-d", ...
     // Start out_argc at 1 (argv[0] = "symlinks")
     int argc = 1;
-    if (flags & 0x01) { out_argv[argc++] = "-c"; }
-    if (flags & 0x02) { out_argv[argc++] = "-d"; }
-    if (flags & 0x04) { out_argv[argc++] = "-r"; }
-    if (flags & 0x08) { out_argv[argc++] = "-s"; }
-    if (flags & 0x10) { out_argv[argc++] = "-t"; }
-    if (flags & 0x20) { out_argv[argc++] = "-v"; }
-    if (flags & 0x40) { out_argv[argc++] = "-x"; }
+    if (flags & 0x01) {
+        out_argv[argc++] = "-c";
+    }
+    if (flags & 0x02) {
+        out_argv[argc++] = "-d";
+    }
+    if (flags & 0x04) {
+        out_argv[argc++] = "-r";
+    }
+    if (flags & 0x08) {
+        out_argv[argc++] = "-s";
+    }
+    if (flags & 0x10) {
+        out_argv[argc++] = "-t";
+    }
+    if (flags & 0x20) {
+        out_argv[argc++] = "-v";
+    }
+    if (flags & 0x40) {
+        out_argv[argc++] = "-x";
+    }
 
     // We'll skip the -o flag or add more bits if you want to test cross-filesystem, etc.
 
@@ -108,7 +121,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size) {
         rmdir(dirpath);
         return 0;
     }
-    uint8_t num_entries = Data[0] % 10; // up to 10 entries
+    uint8_t num_entries = Data[0] % 10;  // up to 10 entries
     Data++;
     Size--;
 
@@ -117,7 +130,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size) {
     //    Expand if you want more advanced directory nesting, etc.
     for (int i = 0; i < num_entries; i++) {
         if (Size < 5) {
-            break; // no more data
+            break;  // no more data
         }
         create_random_entry(Data, 5, dirpath, i);
         Data += 5;
@@ -127,18 +140,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size) {
     // 4) Parse some bits as symlinks flags
     const int kMaxArgs = 16;
     char* argv[kMaxArgs];
-    argv[0] = (char*)"symlinks"; // fake argv[0] name
+    argv[0] = (char*)"symlinks";  // fake argv[0] name
 
     int argc = 1;
     parse_flags_from_data(&Data, &Size, &argc, argv);
 
     // 5) Now pass the temporary directory as the final argument => symlinks scans it.
     argv[argc++] = dirpath;
-    argv[argc]   = NULL;
+    argv[argc] = NULL;
 
     // 6) Call the real symlinks "main()" with our synthetic arguments.
     //    We don't care about the return value, we just want to see if it crashes.
-    (void) main(argc, argv);
+    (void)main(argc, argv);
 
     // 7) Clean up the temporary directory
     //    We'll attempt to remove all entries.  We can do it with a quick
