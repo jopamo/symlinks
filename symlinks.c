@@ -589,7 +589,7 @@ static void print_usage(const char* progname) {
             progname, PROGRAM_VERSION, progname, progname, progname);
 }
 
-int main(int argc, char** argv) {
+int symlinks_main(int argc, char** argv) {
     const char* progname = argv[0];
     int opt;
 
