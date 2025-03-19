@@ -2,10 +2,8 @@
 #
 # test_symlinks.sh
 #
-# A simple script to test the various options of the `symlinks` utility.
-# It creates a small test directory tree with different kinds of symlinks
-# (relative, absolute, dangling, messy, and lengthy) and then runs symlinks
-# under different option combinations.
+# A script to test the various options of the `symlinks` utility,
+# extended to include "weirder" broken/circular symlinks.
 #
 # Usage:
 #   chmod +x test_symlinks.sh
@@ -17,7 +15,7 @@
 ################################################################################
 
 # Point this to your compiled symlinks binary if not in PATH
-SYMLINKS_BINARY="./symlinks"
+SYMLINKS_BINARY="build/symlinks"
 
 # Name of the test directory that will be created
 TESTDIR="symlinks_test"
@@ -38,8 +36,6 @@ create_test_env() {
   touch "$TESTDIR/file1"
   touch "$TESTDIR/subdir/file2"
 
-  # Create a variety of symbolic links
-
   # 1) A relative link pointing to file1
   ln -s file1 "$TESTDIR/rel_link"
 
@@ -50,10 +46,36 @@ create_test_env() {
   ln -s /nonexistent "$TESTDIR/dangling"
 
   # 4) A "messy" link with unnecessary references (./subdir/../.)
-  ln -s ./subdir/../. "$TESTDIR/messy_link"
+  ln -s ./subdir/../subdir/ "$TESTDIR/messy_link"
 
-  # 5) A "lengthy" link with extra ../
-  ln -s ../subdir/ "$TESTDIR/lengthy_link"
+  # 5) A "lengthy" link with extra ../ (fake path to emulate a complex chain)
+  ln -s ./subdir "$TESTDIR/lengthy_link"
+
+  # 6) A symlink pointing to another symlink
+  #    We'll have symlink -> "rel_link" for added fun.
+  ln -s rel_link "$TESTDIR/symlink_to_symlink"
+
+  # 7) A self-referential symlink (a symlink that points to itself)
+  #    This is instantly broken/circular from the OS perspective,
+  #    but interesting for testing.
+  ln -s self_link "$TESTDIR/self_link"
+  (cd "$TESTDIR" && ln -sf self_link self_link)
+
+  # 8) A circular loop of two symlinks referencing each other
+  ln -s loop_b "$TESTDIR/loop_a"
+  ln -s loop_a "$TESTDIR/loop_b"
+
+  # 9) A deep relative path that doesn't exist (dangling, multi-level)
+  mkdir -p "$TESTDIR/subdir2/subsubdir"
+  ln -s ../../nonexistent_dir/deeper/file.txt "$TESTDIR/subdir2/subsubdir/deep_dangling"
+
+  # 10) Another absolute path link that doesn't exist (dangling)
+  ln -s /an/absolute/path/that/does/not/exist "$TESTDIR/abs_dangling"
+
+  # 11) A symlink pointing inside subdir that is actually a symlink
+  #     We’ll create subdir_link -> subdir, then link_into_subdir -> subdir_link/file2
+  ln -s subdir "$TESTDIR/subdir_link"
+  ln -s subdir_link/file2 "$TESTDIR/link_into_subdir"
 }
 
 check_binary() {
@@ -64,11 +86,11 @@ check_binary() {
 }
 
 ################################################################################
-# Test Cases
+# Test Cases (mostly using -x)
 ################################################################################
 
 test_basic_scan() {
-  echo "==== Test 1: Basic Scan (no options) ===="
+  echo "==== Test 1: Basic Scan (no options, but debug mode) ===="
   create_test_env
   "$SYMLINKS_BINARY" -x "$TESTDIR"
   if [ $? -ne 0 ]; then
@@ -147,8 +169,6 @@ test_shorten_convert() {
 test_other_fs() {
   echo "==== Test 8: Other Filesystem (-o) ===="
   echo "Note: This requires a link to a different filesystem to fully test."
-  echo "We will just run symlinks with -o, but the test environment may not"
-  echo "demonstrate 'other_fs' unless you create cross-device symlinks."
   create_test_env
   "$SYMLINKS_BINARY" -x -o "$TESTDIR"
   if [ $? -ne 0 ]; then
@@ -171,8 +191,78 @@ test_test_mode() {
 }
 
 ################################################################################
+# Verification Helper (allowing for path equivalences)
+################################################################################
+
+# verify_symlink_equiv <link> <expected_target>
+#
+# Uses readlink to get the symlink's raw string,
+# and realpath (with -m) to see if both the actual
+# link target and <expected_target> resolve to the same absolute path.
+verify_symlink_equiv() {
+  local linkpath="$1"
+  local expected_raw="$2"
+
+  # Make sure the link actually exists and is a symlink
+  if [ ! -L "$linkpath" ]; then
+    echo "FAIL: $linkpath is not a symlink (expected)."
+    FAIL=1
+    return
+  fi
+
+  # The string that the link actually points to
+  local actual_string
+  actual_string="$(readlink "$linkpath")"
+
+  # We'll convert both the actual link target and the expected target
+  # into absolute paths *relative to the symlink's directory*.
+  local link_dir
+  link_dir="$(dirname "$linkpath")"
+
+  local actual_resolved
+  local expected_resolved
+
+  actual_resolved="$(realpath -m "$link_dir/$actual_string")"
+  expected_resolved="$(realpath -m "$link_dir/$expected_raw")"
+
+  if [ "$actual_resolved" != "$expected_resolved" ]; then
+    echo "FAIL: Symlink $linkpath resolves to '$actual_resolved' but we expected '$expected_resolved'"
+    echo "      (raw link text was '$actual_string')"
+    FAIL=1
+  else
+    echo "OK: Symlink $linkpath resolves to '$actual_resolved' as expected."
+  fi
+}
+
+################################################################################
+# Test symlinks *without* the -x option, verifying via realpath
+################################################################################
+test_no_debug_mode() {
+  echo "==== Test 10: Normal Operation (no -x), then verify ===="
+  create_test_env
+
+  # We'll run symlinks with -r -c -s so we can see changes happen
+  "$SYMLINKS_BINARY" -r -c -s "$TESTDIR"
+  if [ $? -ne 0 ]; then
+    echo "Test 10 failed (command returned non-zero)."
+    FAIL=1
+  fi
+
+  echo "Verifying that symlinks were updated properly:"
+
+  # We'll verify a couple of known links that should end up normalized to 'subdir'
+  verify_symlink_equiv "$TESTDIR/messy_link" "subdir"
+  verify_symlink_equiv "$TESTDIR/lengthy_link" "subdir"
+
+  echo
+}
+
+################################################################################
 # Main
 ################################################################################
+rm -rf build
+meson setup build --reconfigure
+meson compile -C build
 
 check_binary
 
@@ -185,6 +275,7 @@ test_shorten
 test_shorten_convert
 test_other_fs
 test_test_mode
+test_no_debug_mode
 
 echo "All tests completed."
 

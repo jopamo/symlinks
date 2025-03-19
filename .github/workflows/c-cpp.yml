@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        sanitizer:
+          - none
+          - asan-ubsan
+          - valgrind
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            autopoint \
+            build-essential \
+            clang \
+            gcc \
+            gettext \
+            libtool \
+            meson \
+            pkg-config \
+            valgrind \
+            xvfb
+
+      - name: Set up environment and build
+        shell: bash
+        run: |
+          # If using a configure script, you might do: ./autogen.sh or ./configure here
+          # Adjust as needed for your project’s build system
+
+          # Configure environment according to the sanitizer
+          if [ "${{ matrix.sanitizer }}" = "asan-ubsan" ]; then
+            echo "==> Building with ASan + UBSan"
+            export CC=clang
+            export CXX=clang++
+            export CFLAGS="-O1 -g -fsanitize=address,undefined"
+            export CXXFLAGS="$CFLAGS"
+            export LDFLAGS="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitizer }}" = "valgrind" ]; then
+            echo "==> Building for Valgrind checks"
+            export CC=gcc
+            export CXX=g++
+            export CFLAGS="-O1 -g"
+            export CXXFLAGS="$CFLAGS"
+          else
+            echo "==> Building with no special sanitizer"
+            export CC=gcc
+            export CXX=g++
+            export CFLAGS="-O2"
+            export CXXFLAGS="$CFLAGS"
+          fi
+
+          ./test.sh
