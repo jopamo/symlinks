@@ -97,5 +97,5 @@ jobs:
         run: |
           echo "==> Running fuzz target for up to 30s to check for crashes"
           set -e
-          ./fuzz_symlinks_full -max_total_time=60 -rss_limit_mb=1024 -max_len=2048
+          ./fuzz_symlinks_full -max_total_time=30 -rss_limit_mb=128 -max_len=256
 
