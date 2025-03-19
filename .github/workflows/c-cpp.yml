@@ -39,13 +39,9 @@ jobs:
             valgrind \
             xvfb
 
-      - name: Set up environment and build
+      - name: Set up environment variables
         shell: bash
         run: |
-          # If using a configure script, you might do: ./autogen.sh or ./configure here
-          # Adjust as needed for your project’s build system
-
-          # Configure environment according to the sanitizer
           if [ "${{ matrix.sanitizer }}" = "asan-ubsan" ]; then
             echo "==> Building with ASan + UBSan"
             export CC=clang
@@ -67,4 +63,39 @@ jobs:
             export CXXFLAGS="$CFLAGS"
           fi
 
+          # Make these exports visible in subsequent steps
+          echo "CC=$CC"         >> $GITHUB_ENV
+          echo "CXX=$CXX"       >> $GITHUB_ENV
+          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
+          echo "LDFLAGS=$LDFLAGS"   >> $GITHUB_ENV
+
+      - name: Build and run normal tests
+        shell: bash
+        run: |
+          # This is your existing test script or build steps
+          # Adjust as needed for your actual commands (meson, make, etc.)
           ./test.sh
+
+      - name: Build fuzz target
+        if: matrix.sanitizer == 'asan-ubsan'
+        shell: bash
+        run: |
+          echo "==> Building fuzz target with Clang + ASan/UBSan"
+
+          # Example direct compile (adjust paths to match your code):
+          # Suppose you have a harness `fuzz_symlinks_full.c` and your main sources.
+          clang $CFLAGS $LDFLAGS -fsanitize=fuzzer \
+            -I. \
+            fuzz_symlinks_full.c \
+            symlinks.c \
+            -o fuzz_symlinks_full
+
+      - name: Run fuzz target (short time limit)
+        if: matrix.sanitizer == 'asan-ubsan'
+        shell: bash
+        run: |
+          echo "==> Running fuzz target for up to 30s to check for crashes"
+          set -e
+          # -runs=N or -max_total_time=30 is common; adjust as needed
+          ./fuzz_symlinks_full -max_total_time=30
