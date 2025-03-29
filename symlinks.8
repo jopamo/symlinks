@@ -1,4 +1,4 @@
-.TH SYMLINKS 8 "October 2008" "Version 1.4"
+.TH SYMLINKS 8 "April 2014" "Version 1.4.3"
 
 .SH NAME
 symlinks \- symbolic link maintenance utility
@@ -10,10 +10,8 @@ symlinks \- symbolic link maintenance utility
 dirlist
 .SH DESCRIPTION
 .BI symlinks
-is a useful utility for maintainers of FTP sites, CDROMs,
-and Linux software distributions.
-It scans directories for symbolic links and lists them on stdout,
-often revealing flaws in the filesystem tree.
+scans directories for symbolic links and lists them on stdout,
+often revealing broken links in the filesystem tree.
 .PP
 Each link is output with a classification of
 .B relative,
@@ -63,7 +61,7 @@ from where symlinks was run (most useful with
 .PP
 .SH OPTIONS
 .TP
-.I -c 
+.I -c
 convert absolute links (within the same filesystem) to relative links.
 This permits links to maintain their validity regardless of the mount
 point used for the filesystem -- a desirable setup in most cases.
@@ -85,11 +83,11 @@ causes
 .B dangling
 links to be removed.
 .TP
-.I -o 
+.I -o
 fix links on other filesystems encountered while recursing.
 Normally, other filesystems encountered are not modified by symlinks.
 .TP
-.I -r 
+.I -r
 recursively operate on subdirectories within the same filesystem.
 .TP
 .I -s
@@ -104,10 +102,10 @@ would do if
 .B -c
 were specified, but without really changing anything.
 .TP
-.I -v 
-show all symbolic links.  By default, 
+.I -v
+show all symbolic links.  By default,
 .B relative
-links are not shown unless 
+links are not shown unless
 .B -v
 is specified.
 .PP
@@ -116,8 +114,7 @@ is specified.
 does not recurse or change links across filesystems.
 .PP
 .SH AUTHOR
-.B symlinks 
-has been written by Mark Lord <mlord@pobox.com>, the original developer and maintainer
-of the IDE Performance Package for linux, the Linux IDE Driver subsystem, hdparm, and a current day libata hacker.
+.B symlinks
+was created by Mark Lord <mlord@pobox.com>.
 .SH SEE ALSO
 .BR symlink (2)

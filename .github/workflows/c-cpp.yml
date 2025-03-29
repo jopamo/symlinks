@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        sanitizer:
+          - none
+          - asan-ubsan
+          - valgrind
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            autopoint \
+            build-essential \
+            clang \
+            gcc \
+            gettext \
+            libtool \
+            meson \
+            pkg-config \
+            valgrind \
+            xvfb
+
+      - name: Set up environment variables
+        shell: bash
+        run: |
+          if [ "${{ matrix.sanitizer }}" = "asan-ubsan" ]; then
+            echo "==> Building with ASan + UBSan"
+            export CC=clang
+            export CXX=clang++
+            export CFLAGS="-O1 -g -fsanitize=address,undefined"
+            export CXXFLAGS="$CFLAGS"
+            export LDFLAGS="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitizer }}" = "valgrind" ]; then
+            echo "==> Building for Valgrind checks"
+            export CC=gcc
+            export CXX=g++
+            export CFLAGS="-O1 -g"
+            export CXXFLAGS="$CFLAGS"
+          else
+            echo "==> Building with no special sanitizer"
+            export CC=gcc
+            export CXX=g++
+            export CFLAGS="-O2"
+            export CXXFLAGS="$CFLAGS"
+          fi
+
+          # Make these exports visible in subsequent steps
+          echo "CC=$CC"         >> $GITHUB_ENV
+          echo "CXX=$CXX"       >> $GITHUB_ENV
+          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
+          echo "LDFLAGS=$LDFLAGS"   >> $GITHUB_ENV
+
+      - name: Build and run normal tests
+        shell: bash
+        run: |
+          # This is your existing test script or build steps
+          # Adjust as needed for your actual commands (meson, make, etc.)
+          ./test.sh
+
+      - name: Build fuzz target
+        if: matrix.sanitizer == 'asan-ubsan'
+        shell: bash
+        run: |
+          echo "==> Building fuzz target with Clang + ASan/UBSan"
+
+          # Example direct compile (adjust paths to match your code):
+          # Suppose you have a harness `fuzz_symlinks_full.c` and your main sources.
+          clang $CFLAGS $LDFLAGS -fsanitize=fuzzer \
+            -I. \
+            fuzz_symlinks.cpp \
+            symlinks.c \
+            -o fuzz_symlinks_full
+
+      - name: Run fuzz target (short time limit)
+        if: matrix.sanitizer == 'asan-ubsan'
+        shell: bash
+        run: |
+          echo "==> Running fuzz target for up to 30s to check for crashes"
+          set -e
+          ./fuzz_symlinks_full -max_total_time=30 -rss_limit_mb=128 -max_len=256
+
